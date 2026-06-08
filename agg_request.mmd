@@ -1,0 +1,39 @@
+---
+config:
+  theme: dark
+---
+sequenceDiagram
+    autonumber
+
+    participant Client as Client / SDK
+    participant Frontend as Dynamo Frontend + KV Router<br/>(Gateway / API / Routing / KV Index State)
+    participant Sidecar as Dynamo Sidecar
+    participant Engine as Native Engine Server<br/>(vLLM / TRT-LLM / SGLang)
+
+    Client->>Frontend: Send request<br/>(prompt, params, stream=true)
+
+    Frontend->>Frontend: Authenticate / authorize
+    Frontend->>Frontend: Normalize to Dynamo request schema
+    Frontend->>Frontend: Select aggregated worker using KV router
+
+    Frontend->>Sidecar: Forward Dynamo request
+
+    Sidecar->>Sidecar: Normalize to OpenEngine request schema
+    Sidecar->>Engine: Invoke engine over OpenEngine API
+
+    Engine->>Engine: Normalize to engine-native request schema
+    Engine->>Engine: Execute aggregated request<br/>(prefill + decode together)
+
+    Engine-->>Sidecar: Stream response over OpenEngine API<br/>(tokens, usage, finish reason, errors)
+    Sidecar->>Sidecar: Normalize to Dynamo response schema
+
+    Sidecar-->>Frontend: Stream Dynamo response
+    Frontend-->>Client: Stream response
+
+    par Event plane
+        Engine-->>Sidecar: Emit OpenEngine events<br/>(request status / KV events / metrics)
+        Sidecar->>Sidecar: Normalize to Dynamo routing state
+        Sidecar-->>Frontend: Publish Dynamo routing + state events<br/>(capacity / KV metadata / request status)
+    and State update
+        Frontend->>Frontend: Update KV router state<br/>(KV index, worker capacity, request status)
+    end

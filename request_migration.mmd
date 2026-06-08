@@ -1,0 +1,58 @@
+---
+config:
+  theme: dark
+---
+sequenceDiagram
+    autonumber
+
+    participant Client as Client / SDK
+    participant Frontend as Dynamo Frontend + KV Router<br/>(Gateway / API / Routing / KV Index State)
+    participant SourceSidecar as Source Dynamo Sidecar
+    participant SourceEngine as Source Native Engine Server<br/>(vLLM / TRT-LLM / SGLang)
+    participant TargetSidecar as Target Dynamo Sidecar
+    participant TargetEngine as Target Native Engine Server<br/>(vLLM / TRT-LLM / SGLang)
+
+    rect rgb(45, 45, 45)
+        Note over Client,SourceEngine: Initial request flow already established<br/>(See normal agg flow)
+    end
+
+    SourceEngine-->>SourceSidecar: Stream response over OpenEngine API<br/>(tokens, usage, finish reason, errors)
+    SourceSidecar->>SourceSidecar: Normalize to Dynamo response schema
+    SourceSidecar-->>Frontend: Stream Dynamo response
+
+    Frontend->>Frontend: Accumulate generated tokens<br/>(prompt + received output tokens)
+    Frontend-->>Client: Stream response
+
+    SourceEngine--xSourceSidecar: Request stream fails<br/>(worker failure / engine failure / disconnect)
+    SourceSidecar--xFrontend: Propagate stream failure
+
+    Frontend->>Frontend: Detect migratable failure
+    Frontend->>Frontend: Rebuild Dynamo request from accumulated state<br/>(prompt + generated tokens, updated token budget)
+    Frontend->>Frontend: Select target worker using KV router
+
+    Frontend->>TargetSidecar: Forward rebuilt Dynamo request
+
+    TargetSidecar->>TargetSidecar: Normalize to OpenEngine request schema
+    TargetSidecar->>TargetEngine: Invoke engine over OpenEngine API
+
+    TargetEngine->>TargetEngine: Normalize to engine-native request schema
+    TargetEngine->>TargetEngine: Continue generation<br/>(using accumulated tokens as context)
+
+    TargetEngine-->>TargetSidecar: Stream response over OpenEngine API<br/>(tokens, usage, finish reason, errors)
+    TargetSidecar->>TargetSidecar: Normalize to Dynamo response schema
+    TargetSidecar-->>Frontend: Stream Dynamo response
+
+    Frontend->>Frontend: Accumulate additional generated tokens
+    Frontend-->>Client: Continue response stream
+
+    par Event plane
+        SourceEngine-->>SourceSidecar: Emit OpenEngine events<br/>(request status / KV events / metrics)
+        SourceSidecar->>SourceSidecar: Normalize to Dynamo routing state
+        SourceSidecar-->>Frontend: Publish Dynamo routing + state events<br/>(worker failure / capacity / request status)
+
+        TargetEngine-->>TargetSidecar: Emit OpenEngine events<br/>(request status / KV events / metrics)
+        TargetSidecar->>TargetSidecar: Normalize to Dynamo routing state
+        TargetSidecar-->>Frontend: Publish Dynamo routing + state events<br/>(capacity / KV metadata / request status)
+    and State update
+        Frontend->>Frontend: Update KV router state<br/>(request owner, KV index, worker capacity, migration status)
+    end

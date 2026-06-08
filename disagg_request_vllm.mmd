@@ -1,0 +1,62 @@
+---
+config:
+  theme: dark
+---
+sequenceDiagram
+    autonumber
+
+    participant Client as Client / SDK
+    participant Frontend as Dynamo Frontend + KV Router<br/>(Gateway / API / Routing / KV Index State)
+    participant PrefillSidecar as Prefill Dynamo Sidecar
+    participant PrefillEngine as Native Prefill Engine Server<br/>(vLLM)
+    participant DecodeSidecar as Decode Dynamo Sidecar
+    participant DecodeEngine as Native Decode Engine Server<br/>(vLLM)
+
+    Client->>Frontend: Send request<br/>(prompt, params, stream=true)
+
+    Frontend->>Frontend: Authenticate / authorize
+    Frontend->>Frontend: Normalize to Dynamo request schema
+    Frontend->>Frontend: Select prefill worker using KV router
+
+    Frontend->>PrefillSidecar: Forward Dynamo prefill request
+
+    PrefillSidecar->>PrefillSidecar: Normalize to OpenEngine prefill request schema
+    PrefillSidecar->>PrefillEngine: Invoke prefill over OpenEngine API
+
+    PrefillEngine->>PrefillEngine: Normalize to vLLM prefill request schema
+    PrefillEngine->>PrefillEngine: Execute prefill<br/>(prompt processing + KV cache population)
+
+    PrefillEngine-->>PrefillSidecar: Return prefill result over OpenEngine API<br/>(KV transfer params, usage, errors)
+    PrefillSidecar->>PrefillSidecar: Normalize to Dynamo prefill response schema
+
+    PrefillSidecar-->>Frontend: Return Dynamo prefill response<br/>(KV transfer params)
+
+    Frontend->>Frontend: Update KV router state from prefill result
+    Frontend->>Frontend: Select decode worker using KV router
+
+    Frontend->>DecodeSidecar: Forward Dynamo decode request<br/>(KV transfer params, params)
+
+    DecodeSidecar->>DecodeSidecar: Normalize to OpenEngine decode request schema
+    DecodeSidecar->>DecodeEngine: Invoke decode over OpenEngine API
+
+    DecodeEngine->>DecodeEngine: Normalize to vLLM decode request schema
+    DecodeEngine->>DecodeEngine: Attach KV transfer params
+    DecodeEngine->>DecodeEngine: Execute decode<br/>(generate tokens from transferred KV)
+
+    DecodeEngine-->>DecodeSidecar: Stream response over OpenEngine API<br/>(tokens, usage, finish reason, errors)
+    DecodeSidecar->>DecodeSidecar: Normalize to Dynamo response schema
+
+    DecodeSidecar-->>Frontend: Stream Dynamo response
+    Frontend-->>Client: Stream response
+
+    par Event plane
+        PrefillEngine-->>PrefillSidecar: Emit OpenEngine events<br/>(request status / KV events / metrics)
+        PrefillSidecar->>PrefillSidecar: Normalize to Dynamo routing state
+        PrefillSidecar-->>Frontend: Publish Dynamo routing + state events<br/>(capacity / KV metadata / request status)
+
+        DecodeEngine-->>DecodeSidecar: Emit OpenEngine events<br/>(request status / KV events / metrics)
+        DecodeSidecar->>DecodeSidecar: Normalize to Dynamo routing state
+        DecodeSidecar-->>Frontend: Publish Dynamo routing + state events<br/>(capacity / KV metadata / request status)
+    and State update
+        Frontend->>Frontend: Update KV router state<br/>(KV index, worker capacity, request status)
+    end

@@ -1,0 +1,56 @@
+---
+config:
+  theme: dark
+---
+sequenceDiagram
+    autonumber
+
+    participant Client as Client / SDK
+    participant Frontend as Dynamo Frontend + KV Router<br/>(Gateway / API / Routing / KV Index State)
+    participant Sidecar as Dynamo Sidecar
+    participant Engine as Native Engine Server<br/>(vLLM / TRT-LLM / SGLang)
+
+    Client->>Frontend: Send request<br/>(prompt, params, stream=true)
+
+    Frontend->>Frontend: Authenticate / authorize
+    Frontend->>Frontend: Normalize to Dynamo request schema
+    Frontend->>Frontend: Select worker using KV router
+
+    Frontend->>Sidecar: Forward Dynamo request
+
+    Sidecar->>Sidecar: Normalize to OpenEngine request schema
+    Sidecar->>Engine: Invoke engine over OpenEngine API
+
+    Engine->>Engine: Normalize to engine-native request schema
+    Engine->>Engine: Begin execution<br/>(prefill and/or decode)
+
+    Engine-->>Sidecar: Stream partial response over OpenEngine API<br/>(tokens, usage, intermediate status)
+    Sidecar->>Sidecar: Normalize to Dynamo response schema
+    Sidecar-->>Frontend: Stream partial Dynamo response
+    Frontend-->>Client: Stream partial response
+
+    Client->>Frontend: Cancel request<br/>(client disconnect / explicit cancel)
+
+    Frontend->>Frontend: Mark request as cancelled
+    Frontend->>Sidecar: Send Dynamo cancellation<br/>(request id)
+
+    Sidecar->>Sidecar: Normalize to OpenEngine cancellation schema
+    Sidecar->>Engine: Cancel request over OpenEngine API
+
+    Engine->>Engine: Normalize to engine-native cancellation
+    Engine->>Engine: Stop scheduling / generation<br/>release request resources
+
+    Engine-->>Sidecar: Acknowledge cancellation over OpenEngine API
+    Sidecar->>Sidecar: Normalize to Dynamo cancellation result
+    Sidecar-->>Frontend: Acknowledge Dynamo cancellation
+
+    Frontend->>Frontend: Finalize cancelled request state
+    Frontend-->>Client: Stop response stream
+
+    par Event plane
+        Engine-->>Sidecar: Emit OpenEngine events<br/>(cancel requested / cancel acknowledged / KV cleanup / metrics)
+        Sidecar->>Sidecar: Normalize to Dynamo routing state
+        Sidecar-->>Frontend: Publish Dynamo routing + state events<br/>(request cancelled / capacity released / KV metadata updated)
+    and State update
+        Frontend->>Frontend: Update KV router state<br/>(request status, worker capacity, KV index)
+    end
