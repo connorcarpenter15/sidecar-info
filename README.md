@@ -15,6 +15,7 @@ vLLM forks.
 |---|---|
 | [`implementation_brief.md`](./implementation_brief.md) | The implementation brief: architecture, scope, and what the sidecar should look like. Start here. |
 | [`openengine_api.md`](./openengine_api.md) | The OpenEngine v1 API spec — the canonical `.proto` contract (Generate, model/load metadata, health, lifecycle, disagg, KV events). |
+| [`multimodal_support.md`](./multimodal_support.md) | Multimodal status (image agg+P/D works; video/audio blocked) and why the P0/P1 process split causes the audio/video parity gap. |
 | `*.mmd` | Editable Mermaid sources for the request-sequence diagrams. |
 | [`assets/`](./assets) | Rendered `.png` of each diagram. |
 | [`benchmarks/`](./benchmarks) | Dated benchmark reports (`benchmark_<platform>_<scenario>_<date>.md`). |
