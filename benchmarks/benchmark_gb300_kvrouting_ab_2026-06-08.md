@@ -6,12 +6,27 @@ vLLM+Dynamo, at an operating point that exercises **KV-event publishing +
 KV-aware prefill routing**. Doubles as the runtime gate for the sidecar's
 `endpoint_addr` rewrite in `GetKvEventSources` (issue #45).
 
-**Headline:** the sidecar shows **no regression** — total token throughput is at
-parity (**−0.2%**, 15,935 vs 15,966 tok/s) and **TTFT is materially better**
-(avg 1,195 vs 2,018 ms; p90 1,716 vs 6,905 ms). The Dynamo KV router subscribed
-**directly** to the sidecar prefill workers' ZMQ KV-event endpoint and built its
-routing radix tree — confirming the rewritten routable `endpoint_addr` works at
-runtime (#45 PASSED).
+**Headline:** total token throughput is at parity (**−0.2%**, 15,935 vs 15,966
+tok/s). A deeper look at the server-side metrics revises two claims from an
+earlier read of this run:
+
+1. **The lower sidecar TTFT is a measurement artifact, not a serving win.** The
+   sidecar's better TTFT (avg 1,195 vs 2,018 ms; p90 1,716 vs 6,905 ms) is
+   dominated by the in-process Python frontend's `stream-interval 50` gating the
+   first client-visible SSE chunk — the *same* artifact that makes ITL
+   incomparable. Engine-local prefix-cache hit rate is ~equal across legs (~10%)
+   and prefill load is evenly spread on **both** legs, so the gap is not a
+   routing/cache quality difference. (To confirm: a control re-run with
+   `stream-interval 1` should collapse the in-process TTFT toward the sidecar's.)
+2. **#45's subscription + wire-decode path works, but the sidecar's downstream
+   KV-event _indexing_ is broken.** The Dynamo KV router subscribed **directly**
+   to the prefill workers' ZMQ endpoint and decoded the wire (confirming the
+   routable `endpoint_addr` rewrite reaches the publisher). But ~99.8% of "block
+   stored" events failed parent linkage at the radix tree (**16** stored-ok vs
+   **9,274** `parent_block_not_found` on the sidecar, vs **9,273** stored-ok / **0**
+   parent failures on the in-process bridge), so the router's prefix index never
+   built and **KV-aware prefix routing was effectively non-operational** on the
+   sidecar leg. This is a real bug in the `zmq_wire` converter (see Caveats).
 
 ## What was tested
 
@@ -118,11 +133,15 @@ is the meaningful figure).
 | output tok/s | −3.0% (762.2 vs 785.9) — tracks ~3% fewer tokens generated |
 | total output tokens | −3.0% (2,708,627 vs 2,791,417) |
 | request tput | 0.0% (2.62 vs 2.62) |
-| TTFT avg | **−40.8%** (−823 ms; 1,194.7 vs 2,017.8) — better |
-| TTFT p50 | −14.9% (875.3 vs 1,028.6) — better |
-| TTFT p90 | **−75.1%** (1,716.3 vs 6,904.8) — better |
-| TTFT p99 | −23.4% (10,647.5 vs 13,897.3) — better |
-| e2e latency avg | **−17.9%** (8,197.7 vs 9,986.6) — better |
+| TTFT avg | **−40.8%** (−823 ms; 1,194.7 vs 2,017.8) — artifact‡ |
+| TTFT p50 | −14.9% (875.3 vs 1,028.6) — artifact‡ |
+| TTFT p90 | **−75.1%** (1,716.3 vs 6,904.8) — artifact‡ |
+| TTFT p99 | −23.4% (10,647.5 vs 13,897.3) — artifact‡ |
+| e2e latency avg | **−17.9%** (8,197.7 vs 9,986.6) — partly artifact‡ (TTFT is a component of e2e) |
+
+‡ The deltas are real measurements, but **TTFT is not cleanly comparable across
+legs** — the in-process Python frontend's `stream-interval 50` gates the first
+SSE chunk, the same artifact that makes ITL incomparable. See Takeaway.
 
 ## Takeaway
 
@@ -132,14 +151,26 @@ is the meaningful figure).
   variance: both legs sometimes stop short of the requested length; sidecar had
   1,682 vs the baseline's 1,320 mismatches) — a sampling-level variance, not a
   serving regression.
-- **TTFT: materially better on the sidecar, with a much tighter tail.** Average
-  TTFT is −41% (1,195 vs 2,018 ms) and p90 is −75% (1.7 s vs 6.9 s). On a
-  prefix-sharing trace with KV-aware routing, TTFT is the metric that most
-  directly reflects whether KV-event subscription + KV-aware prefill routing are
-  working: lower TTFT means the router is landing requests on prefill workers
-  that already hold the cached prefix. A broken/unroutable `endpoint_addr` would
-  degrade routing toward round-robin and make TTFT **worse** — the opposite of
-  what we see.
+- **TTFT: lower on the sidecar, but this is a `stream-interval` artifact, not a
+  serving win.** The measured deltas are real (avg −41%, p90 −75%), but the cause
+  is the same chunking artifact that makes ITL incomparable: the in-process
+  Python frontend honors `stream-interval 50`, so the *first* client-visible SSE
+  chunk isn't emitted until ~50 decode tokens exist (~50 × ITL ≈ 1.3 s of added
+  *measured* TTFT), while the vllm-rs frontend re-emits per token (first chunk =
+  first token = true TTFT). The arithmetic fits: the ~0.8 s avg TTFT gap ≈ 50 ×
+  the in-process ITL. Three independent checks rule out a routing/cache cause:
+  - **Engine-local prefix-cache hit rate is ~equal** — in-process **10.96%**
+    cumulative (`vllm:prefix_cache_hits/queries`) vs sidecar **~9.7%** windowed
+    (from the vllm-rs prefill-worker `log_stats`). Not higher on the sidecar.
+  - **Both legs spread prefill load evenly** — in-process 16 DP-rank endpoints
+    all at inflight ~0.30; sidecar 4 worker-endpoints all at ~0.67
+    (`dynamo_component_inflight_requests`). Neither router concentrated load.
+  - **The sidecar's router prefix index never built** (next section), so it
+    could not have been routing on superior prefix overlap in the first place.
+
+  Net: **TTFT is not cleanly comparable across legs here** — like ITL, it is
+  confounded by the in-process frontend's chunking. A `stream-interval 1` control
+  re-run is the clean confirmation.
 - **ITL / goodput are not comparable across legs.** The in-process Python
   frontend honors `stream-interval 50`, so it emits 50-token SSE chunks
   (inter-chunk latency ≈ 1,226 ms) while reporting per-token ITL ≈ 26.6 ms; the
@@ -148,31 +179,51 @@ is the meaningful figure).
   (0.63 vs 0.16 good-fraction) is dominated by this measurement artifact, **not**
   a quality difference. Use throughput + TTFT, never ITL/goodput, across legs.
 
-## #45 — `endpoint_addr` runtime gate: PASSED
+## #45 — `endpoint_addr` runtime gate: subscription PASSED, but indexing is broken
 
-Direct evidence from the **sidecar** leg's logs (`theia0235_prefill_w0.out`):
+The #45 gate (does the rewritten routable `endpoint_addr` let a cross-node router
+reach the publisher?) **passed** — but the run also surfaced a separate, real bug
+*downstream* of it. Splitting the two:
+
+**What passed — subscription + wire-decode reach the publisher.** Direct evidence
+from the **sidecar** leg's logs (`theia0235_prefill_w0.out`):
 
 1. **KV-event publishers up.** The prefill EngineCore PUBs KV events from every
    DP rank — `kv_events.py:329 Starting ZMQ publisher thread` on
    `EngineCore_DP0/1/2/3`.
 2. **Router subscribed and decoded the wire.**
    `dynamo_kv_router::zmq_wire::convert` log lines show the Dynamo KV router
-   decoding raw vLLM ZMQ KV-event messages — it connected to the sidecar's
-   advertised endpoint.
-3. **Router built its radix tree.** `dynamo_kv_router::indexer::radix_tree`
-   store/remove operations, tagged per `dp_rank` (0–3) of the prefill worker,
-   run **continuously** for the full ~1-hour replay — the router is consuming KV
-   events into the structure it routes on.
+   decoding raw vLLM ZMQ KV-event messages — it connected, cross-node, to the
+   sidecar's advertised endpoint. If `endpoint_addr` were still the bind wildcard
+   (`*`) or non-routable, the router could not have connected and we'd see **zero**
+   `zmq_wire` activity. We see continuous activity → the routable `endpoint_addr`
+   rewrite works at runtime.
 
-The **in-process** leg has **0** `radix_tree` log lines — its router consumes via
-the `dynamo.vllm` `KvEventPublisher` bridge (in-order, no missing-block races),
-so the `zmq_wire` direct-subscription path is sidecar-specific. The presence of
-active, cross-context ZMQ event consumption on the sidecar leg is *stronger*
-evidence than merely seeing the address string: if `endpoint_addr` were still the
-bind wildcard (`*`) or a non-routable address, the router (running in a different
-process/node) could not have connected and we would see **zero** `zmq_wire` /
-`radix_tree` activity. We see continuous activity → the routable `endpoint_addr`
-rewrite works at runtime.
+**What's broken — the events don't index.** The store events arrive and decode,
+but they do **not** build a usable radix tree. The router's
+`dynamo_component_kv_cache_events_applied` counter (frontend, `backend` component)
+shows the failure starkly:
+
+| `stored` event outcome | in-process (bridge) | sidecar (`zmq_wire`) |
+|---|---:|---:|
+| **ok** (linked into tree) | **9,273** | **16** |
+| **parent_block_not_found** | **0** | **9,274** |
+| `removed, ok` | 179,490 | 184,767 |
+
+Same engine, same `block-size 256`, same workload, ~same number of store events
+(~9,290) — but on the sidecar's direct-ZMQ path **~99.8% of store events fail to
+find their parent block** in the tree, so the prefix index never accumulates
+depth. `dynamo_component_router_shared_cache_hit_rate` recorded **zero**
+observations on *both* legs (not plumbed in disagg PrefillRouter mode), so it
+gives no signal; the `events_applied` breakdown is the real evidence. The
+in-process bridge path (`dynamo.vllm` `KvEventPublisher` → NATS, in-order) links
+every store cleanly (0 failures), which is why this is a `zmq_wire`-specific
+defect, not an engine or block-size issue.
+
+**Consequence:** KV-aware prefix routing was effectively **non-operational** on
+the sidecar leg — with no usable index, the router had no overlap signal and fell
+back to load-spread routing (consistent with the perfectly even prefill load
+above). This is tracked as a follow-up fix (see Caveats).
 
 ## Caveats & follow-ups
 
