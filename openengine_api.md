@@ -120,8 +120,20 @@ message GenerateRequest {
   repeated StopCondition stop = 6;
   bool stream = 7;
 
+  // Multimodal inputs. Order is significant: the i-th item aligns with the
+  // i-th (un-expanded) placeholder marker in the prompt/token_ids. The engine
+  // fetches/decodes and preprocesses each item, then expands the marker into
+  // the model's replacement run. Empty for text-only requests.
+  repeated MediaItem media = 8;
+
   // Required for decode requests in disaggregated serving.
   KvSessionRef kv_session = 20;
+
+  // Router-forced internal data-parallel rank. When set, the engine must
+  // place this request on exactly this DP rank instead of load-balancing,
+  // preserving prefix->rank affinity for KV-aware routing. Unset = let the
+  // engine pick. Rank 0 is valid, hence optional (proto3 presence).
+  optional uint32 data_parallel_rank = 21;
 
   // Optional request metadata for tracing/admission/routing.
   map<string, string> metadata = 30;
@@ -147,6 +159,30 @@ message StopCondition {
     string stop_text = 1;
     uint32 stop_token_id = 2;
   }
+}
+
+// Multimodal modality discriminator. 0 is treated as image for forward
+// compatibility with senders that omit the field.
+enum Modality {
+  MODALITY_UNSPECIFIED = 0;
+  MODALITY_IMAGE = 1;
+  MODALITY_VIDEO = 2;
+  MODALITY_AUDIO = 3;
+}
+
+// A single multimodal input. Exactly one `source` should be set. The engine
+// owns fetch/decode/preprocess -- in the sidecar deployment the orchestrator
+// has no GPU/NIXL agent, so a pre-decoded/RDMA media descriptor is NOT
+// representable here by design.
+message MediaItem {
+  Modality modality = 1;
+  oneof source {
+    string url       = 2;   // http(s):// -- engine fetches
+    string data_uri  = 3;   // data:<mime>;base64,<...> -- engine decodes
+    bytes  raw_bytes = 4;   // pre-fetched bytes -- engine still preprocesses
+  }
+  string mime_type = 5;     // optional, hints raw_bytes decode
+  string uuid      = 6;     // optional caller id / mm_hash
 }
 ```
 
