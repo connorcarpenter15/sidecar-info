@@ -1,0 +1,90 @@
+---
+config:
+  theme: dark
+---
+sequenceDiagram
+    autonumber
+
+    participant Client as Client / SDK
+    participant Frontend as Dynamo Frontend + KV Router<br/>(Gateway / API / Routing / KV Index State)
+    participant EncodeSidecar as Encode Dynamo Sidecar
+    participant EncodeEngine as Native Encode Engine Server<br/>(vLLM - vision/audio encoder)
+    participant PrefillSidecar as Prefill Dynamo Sidecar
+    participant PrefillEngine as Native Prefill Engine Server<br/>(vLLM)
+    participant DecodeSidecar as Decode Dynamo Sidecar
+    participant DecodeEngine as Native Decode Engine Server<br/>(vLLM)
+
+    Client->>Frontend: Send request<br/>(prompt + media URLs, params, stream=true)
+
+    Frontend->>Frontend: Authenticate / authorize
+    Frontend->>Frontend: Normalize to Dynamo request schema
+    Frontend->>Frontend: Detect multimodal media<br/>(token_ids carry un-expanded placeholder markers)
+    Frontend->>Frontend: Select encode worker using router
+
+    Frontend->>EncodeSidecar: Forward Dynamo encode request<br/>(media URLs / data URIs)
+
+    EncodeSidecar->>EncodeSidecar: Normalize to OpenEngine encode request schema<br/>(media items, ENGINE_ROLE_ENCODE)
+    EncodeSidecar->>EncodeEngine: Invoke encode over OpenEngine API
+
+    EncodeEngine->>EncodeEngine: Normalize to vLLM encode request schema
+    EncodeEngine->>EncodeEngine: Fetch / decode media + run vision/audio encoder<br/>(produce mm embeddings, populate encoder cache)
+
+    EncodeEngine-->>EncodeSidecar: Return EncodeReady over OpenEngine API<br/>(EmbeddingSessionRef - embeddings stay on engine GPU/NIXL)
+    EncodeSidecar->>EncodeSidecar: Normalize to Dynamo encode response schema
+
+    EncodeSidecar-->>Frontend: Return Dynamo encode response<br/>(embedding session handle)
+
+    Frontend->>Frontend: Update routing state from encode result
+    Frontend->>Frontend: Select prefill worker using KV router
+
+    Frontend->>PrefillSidecar: Forward Dynamo prefill request<br/>(token_ids + placeholder markers, embedding session ref)
+
+    PrefillSidecar->>PrefillSidecar: Normalize to OpenEngine prefill request schema<br/>(carries embedding_session)
+    PrefillSidecar->>PrefillEngine: Invoke prefill over OpenEngine API
+
+    PrefillEngine->>PrefillEngine: Normalize to vLLM prefill request schema
+    PrefillEngine->>PrefillEngine: Attach embedding session
+
+    EncodeEngine-->>PrefillEngine: Transfer mm embeddings<br/>(NIXL / RDMA - engine-to-engine, opaque handle only via sidecar)
+    PrefillEngine->>PrefillEngine: Execute prefill<br/>(expand placeholders with embeddings + KV cache population)
+
+    PrefillEngine-->>PrefillSidecar: Return PrefillReady over OpenEngine API<br/>(KvSessionRef, usage, errors)
+    PrefillSidecar->>PrefillSidecar: Normalize to Dynamo prefill response schema
+
+    PrefillSidecar-->>Frontend: Return Dynamo prefill response<br/>(KV transfer params)
+
+    Frontend->>Frontend: Update KV router state from prefill result
+    Frontend->>Frontend: Select decode worker using KV router
+
+    Frontend->>DecodeSidecar: Forward Dynamo decode request<br/>(KV transfer params, params)
+
+    DecodeSidecar->>DecodeSidecar: Normalize to OpenEngine decode request schema
+    DecodeSidecar->>DecodeEngine: Invoke decode over OpenEngine API
+
+    DecodeEngine->>DecodeEngine: Normalize to vLLM decode request schema
+    DecodeEngine->>DecodeEngine: Attach KV transfer params
+
+    PrefillEngine-->>DecodeEngine: Transfer KV cache<br/>(NIXL - engine-to-engine)
+    DecodeEngine->>DecodeEngine: Execute decode<br/>(generate tokens from transferred KV)
+
+    DecodeEngine-->>DecodeSidecar: Stream response over OpenEngine API<br/>(tokens, usage, finish reason, errors)
+    DecodeSidecar->>DecodeSidecar: Normalize to Dynamo response schema
+
+    DecodeSidecar-->>Frontend: Stream Dynamo response
+    Frontend-->>Client: Stream response
+
+    par Event plane
+        EncodeEngine-->>EncodeSidecar: Emit OpenEngine events<br/>(request status / encoder-cache / embedding session / metrics)
+        EncodeSidecar->>EncodeSidecar: Normalize to Dynamo routing state
+        EncodeSidecar-->>Frontend: Publish Dynamo routing + state events<br/>(capacity / embedding metadata / request status)
+
+        PrefillEngine-->>PrefillSidecar: Emit OpenEngine events<br/>(request status / KV events / metrics)
+        PrefillSidecar->>PrefillSidecar: Normalize to Dynamo routing state
+        PrefillSidecar-->>Frontend: Publish Dynamo routing + state events<br/>(capacity / KV metadata / request status)
+
+        DecodeEngine-->>DecodeSidecar: Emit OpenEngine events<br/>(request status / KV events / metrics)
+        DecodeSidecar->>DecodeSidecar: Normalize to Dynamo routing state
+        DecodeSidecar-->>Frontend: Publish Dynamo routing + state events<br/>(capacity / KV metadata / request status)
+    and State update
+        Frontend->>Frontend: Update KV router state<br/>(embedding session, KV index, worker capacity, request status)
+    end
