@@ -244,21 +244,8 @@ message KvSessionRef {
   string transfer_backend = 2;
   repeated KvEndpoint endpoints = 3;
   uint32 dp_rank = 4;
-  // DEPRECATED: stringly-typed. The engine must re-parse each value to recover
-  // its JSON type (number vs string vs bool/array), which is error-prone -- a
-  // reparsed integer can leak back onto the wire as a tagged map and corrupt
-  // numeric params like NixlConnector remote_port/tp_size. Prefer
-  // `attributes_struct` (field 6). Retained for v1 compatibility.
-  map<string, string> attributes = 5;
-  // Engine-specific KV-transfer parameters (e.g. NixlConnector
-  // remote_host / remote_port / tp_size / remote_block_ids / do_remote_*),
-  // carried as a Struct so numbers, booleans, and arrays survive the wire with
-  // their JSON type intact -- no string re-parsing on the engine side.
-  // Supersedes `attributes` (field 5): senders SHOULD set exactly one;
-  // receivers MUST prefer this when present. NOTE: Struct numbers are IEEE-754
-  // doubles (exact only to 2^53); for KV params with 64-bit integer values,
-  // carry them as strings within the Struct or use a dedicated field.
-  google.protobuf.Struct attributes_struct = 6;
+  map<string, string> attributes = 5;          // DEPRECATED: prefer attributes_struct
+  google.protobuf.Struct attributes_struct = 6; // type-preserving KV-transfer params
 }
 
 message KvEndpoint {
@@ -268,6 +255,23 @@ message KvEndpoint {
 }
 
 ```
+
+`attributes_struct` requires `import "google/protobuf/struct.proto";` at the
+top of the proto.
+
+**Why a Struct, not `map<string, string>`:** engine-specific KV-transfer
+parameters (e.g. NixlConnector `remote_host` / `remote_port` / `tp_size` /
+`remote_block_ids` / `do_remote_*`) are not all strings. A `map<string,string>`
+forces the receiving engine to re-parse each value to recover its JSON type,
+which is fragile: a value reparsed into a JSON number can leak back onto a
+msgpack/other wire as a tagged object (e.g. `{"$serde_json::private::Number":
+"20097"}`) and corrupt the integer the engine reads — observed crashing
+disaggregated serving when NixlConnector read `remote_port`/`tp_size`. A
+`Struct` preserves number/bool/array/object types across the wire with no
+re-parse. Senders SHOULD set exactly one of `attributes` / `attributes_struct`;
+receivers MUST prefer `attributes_struct` when present. Caveat: `Struct` numbers
+are IEEE-754 doubles (exact only to 2^53) — carry 64-bit integer params as
+strings inside the `Struct`, or add a dedicated typed field.
 
 Prefill flow:
 
@@ -315,10 +319,7 @@ message GetKvEventSourcesResponse {
 
 message KvEventSource {
   string transport = 1;          // grpc, zmq
-  // DEPRECATED: free-form URL. Engines have advertised bind-style wildcards
-  // here (e.g. "tcp://*:5557") that a remote consumer cannot connect to.
-  // Prefer `endpoint_addr` (field 11). Retained for v1 compatibility.
-  string endpoint = 2;           // e.g. tcp://host:5557
+  string endpoint = 2;           // DEPRECATED: prefer endpoint_addr
   string topic = 3;
   string replay_endpoint = 4;    // optional, for ZMQ replay
   uint32 data_parallel_rank = 5;
@@ -327,10 +328,7 @@ message KvEventSource {
   uint32 buffer_steps = 8;
   uint32 hwm = 9;
   uint32 max_queue_size = 10;
-  // Connectable address for the source. MUST be a routable host:port -- never
-  // a bind wildcard (e.g. host "*" / "0.0.0.0"). Supersedes `endpoint`
-  // (field 2): senders SHOULD set this; receivers MUST prefer it when present.
-  KvEndpoint endpoint_addr = 11;
+  KvEndpoint endpoint_addr = 11; // connectable host:port, never a bind wildcard
 }
 
 message SubscribeKvEventsRequest {
@@ -404,7 +402,8 @@ Compatibility notes:
 - SGLang/vLLM-style `BlockStored`, `BlockRemoved`, and `AllBlocksCleared` are first-class OpenEngine events.  
 - OpenEngine preserves batch timestamp, DP-rank attribution, monotonic sequence numbers, replay start sequence, topic, endpoint, replay endpoint, buffer size, HWM, and queue-size metadata.  
 - Native OpenEngine streams should use protobuf. Existing ZMQ/msgpack publishers can be exposed through `GetKvEventSources` during migration.  
-- Orchestrators should prefer `SubscribeKvEvents` when available and fall back to engine-native sources when advertised.
+- Orchestrators should prefer `SubscribeKvEvents` when available and fall back to engine-native sources when advertised.  
+- A source advertised through `GetKvEventSources` MUST be independently connectable: `endpoint_addr` (field 11) carries a routable `host:port`, never a bind wildcard like `tcp://*:5557` or `0.0.0.0`. The legacy `endpoint` string (field 2) often echoes the engine's bind address verbatim, which a remote consumer on another host cannot dial — receivers MUST prefer `endpoint_addr` when present.
 
 ---
 
