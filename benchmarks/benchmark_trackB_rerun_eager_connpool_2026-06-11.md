@@ -109,9 +109,15 @@ was its CUDA graphs; removing them yields parity. **The one residual sidecar
 cost is TTFT, not throughput:** on the small shape at high concurrency the
 sidecar's mean TTFT runs higher than c4 (c256: 1687 vs 857 ms) with a much fatter
 tail (c128 p99: 22.3 s vs 0.72 s), while delivering equal-or-better aggregate
-throughput and 0% fail. This is the gRPC-hop's queueing/HOL jitter surfacing
-where per-token compute is too small to hide it — it shifts the TTFT
-distribution, but does **not** reduce throughput or cause drops.
+throughput and 0% fail. A follow-up pool sweep (c1 `32×512` re-run at
+`OPENENGINE_CONNECTIONS` ∈ {1, 8, 16}) shows this tail is **pool-independent** —
+p99 TTFT is within run-to-run noise across all three pool sizes at every conc,
+with the same onset at c16 (~15 s p99 regardless of connection count; see
+*Caveats*). So it is **not** per-connection HTTP/2 head-of-line blocking and not
+a connection-multiplexing artifact; it is a pool-independent serialization in
+the c1 request path (sidecar → `vllm-rs` OpenEngine server → EngineCore) that
+c4's direct ZMQ path avoids. It shifts the TTFT distribution, but does **not**
+reduce throughput or cause drops.
 
 ## Headline findings
 
@@ -129,12 +135,18 @@ distribution, but does **not** reduce throughput or cause drops.
    real-engine overhead-bound regime where the limiter actually bit.
 
 3. **The residual cost is a TTFT premium, concentrated at high-conc small
-   shapes.** ~5 ms fixed at conc=1 (B2: 50 vs 45 ms), growing to a fat TTFT tail
-   under burst on the small shape (B2 c256: 1687 vs 857 ms mean; c128 p99 22.3 s
-   vs 0.72 s). It does not reduce throughput or cause failures — it is a
-   latency-distribution cost of the hop, paid where there is no compute to
-   amortize it behind. Consistent with the H100 agg A/B's "~8 ms fixed TTFT hop
-   at conc1, amortized under load."
+   shapes — and it is pool-independent.** ~5 ms fixed at conc=1 (B2: 50 vs 45 ms),
+   growing to a fat TTFT tail under burst on the small shape (B2 c256: 1687 vs
+   857 ms mean; c128 p99 22.3 s vs 0.72 s). A pool sweep (c1 at
+   `OPENENGINE_CONNECTIONS` ∈ {1, 8, 16}) leaves the tail unchanged — identical
+   p99 TTFT at every conc, same onset at c16 — so it is **not** gRPC connection
+   multiplexing / HTTP/2 HOL. It is a pool-independent serialization somewhere in
+   the c1 path that c4's direct ZMQ path avoids. It does not reduce throughput or
+   cause failures — it is a latency-distribution cost of the extra hop, paid
+   where there is no compute to amortize it behind. Consistent with the H100 agg
+   A/B's "~8 ms fixed TTFT hop at conc1, amortized under load." (Note this is a
+   *distinct* phenomenon from the heavy-shape failure cliff in finding #2: the
+   pool fixes the cliff but does nothing to this small-shape tail.)
 
 ## How this revises the 4-way doc
 
@@ -162,6 +174,28 @@ remaining.
   dead-even with `c4` (23.4 out-tok/s, 1331 ms; ~2% TTFT premium, TPOT
   identical). So this point is parity too; the "timeout" was purely the
   wall-clock cap, not a sidecar deficit. The table above reflects the rerun.
+- **The small-shape TTFT tail is pool-independent (conn-sweep).** To test
+  whether the B2 `32×512` high-conc tail was per-connection HTTP/2 HOL blocking
+  (the tail's onset at c16 coincides with "2 streams/connection" at pool=8), c1
+  `32×512` was re-run at `OPENENGINE_CONNECTIONS` ∈ {1, 16} and compared to the
+  main run's pool=8. **p99 TTFT (ms) is within run-to-run noise across all three
+  pool sizes at every conc** — the tail turns on at c16 regardless of connection
+  count, refuting the HOL hypothesis:
+
+  | conc | pool=1 | pool=8 | pool=16 |
+  |---|---|---|---|
+  | 1 | 85 | 81 | 81 |
+  | 8 | 176 | 177 | 176 |
+  | 16 | 14983 | 14789 | 15332 |
+  | 32 | 8318 | 8344 | 8157 |
+  | 64 | 16366 | 15750 | 16412 |
+  | 128 | 22768 | 22287 | 22886 |
+  | 256 | 27706 | 27743 | 27719 |
+
+  So the connection pool's benefit is **only** the heavy-shape failure-collapse
+  fix (finding #2); it does nothing for this small-shape latency tail, which
+  comes from a pool-independent serialization in the c1 path. Sweep rundirs:
+  `run-32b-pool{1,16}/aggregate.json` (pool=8 = `run-32b-rerun`).
 - **Heavy-shape TTFT is large and noisy by construction** (8192-token prompts,
   `wall = max(shard)`); the robust signals are the throughput/TPOT parity and
   the 0% fail across the sweep, not the absolute heavy-shape TTFT values.
