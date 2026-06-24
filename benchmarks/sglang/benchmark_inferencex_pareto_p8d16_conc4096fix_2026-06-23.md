@@ -27,6 +27,8 @@ control is the apples-to-apples baseline.
 
 ## Result: clean sidecar/in-process parity across the full sweep
 
+![Sidecar vs in-process throughput per GPU and relative-throughput trend](assets/inferencex_pareto_p8d16_2026-06-23.png)
+
 Per-GPU = total token throughput ÷ 24. `tot/gpu` = input+output tok/s/GPU.
 
 | conc | sidecar tot/gpu | in-proc tot/gpu | **sidecar / in-proc** | medTPOT (side ≈ in-proc) | completion |
