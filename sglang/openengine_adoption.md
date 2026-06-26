@@ -93,8 +93,8 @@ KV-transfer implementation, or native APIs.
 
 ## Request paths
 
-- [Disaggregated SGLang request source](disagg_request_sglang.mmd)
-- [Rendered request diagram](assets/disagg_request_sglang.png)
+- [Disaggregated SGLang request source](diagrams/disagg_request.mmd)
+- [Rendered request diagram](diagrams/disagg_request.png)
 - [Neutral aggregated request](../diagrams/agg_request.mmd)
 - [Cancellation flow](../diagrams/request_cancellation.mmd)
 
@@ -112,8 +112,8 @@ before sending them to a worker.
 
 Existing reports compare the sidecar with Dynamo's in-process SGLang worker:
 
-- [Track B real-engine comparison](../benchmarks/sglang/benchmark_trackB_sglang_2026-06-12.md)
-- [P8/D16 concurrency sweep](../benchmarks/sglang/benchmark_inferencex_pareto_p8d16_conc4096fix_2026-06-23.md)
+- [Track B real-engine comparison](benchmarks/benchmark_trackB_sglang_2026-06-12.md)
+- [P8/D16 concurrency sweep](benchmarks/benchmark_inferencex_pareto_p8d16_conc4096fix_2026-06-23.md)
 
 These reports describe their hardware, models, and run conditions. They are
 point measurements, not general performance guarantees.

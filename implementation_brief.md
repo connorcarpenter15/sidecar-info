@@ -11,10 +11,10 @@ files as editable sources and the `.png` files as rendered references.
 
 | Flow | Source | Rendered |
 |---|---|---|
-| Aggregated request | [`agg_request.mmd`](./diagrams/agg_request.mmd) | [`agg_request.png`](./diagrams/assets/agg_request.png) |
-| vLLM disaggregation | [`disagg_request_vllm.mmd`](./vllm/disagg_request_vllm.mmd) | [`disagg_request_vllm.png`](./vllm/assets/disagg_request_vllm.png) |
-| Cancellation | [`request_cancellation.mmd`](./diagrams/request_cancellation.mmd) | [`request_cancellation.png`](./diagrams/assets/request_cancellation.png) |
-| Migration | [`request_migration.mmd`](./diagrams/request_migration.mmd) | [`request_migration.png`](./diagrams/assets/request_migration.png) |
+| Aggregated request | [`agg_request.mmd`](./diagrams/agg_request.mmd) | [`agg_request.png`](./diagrams/agg_request.png) |
+| vLLM disaggregation | [`disagg_request.mmd`](./vllm/diagrams/disagg_request.mmd) | [`disagg_request.png`](./vllm/diagrams/disagg_request.png) |
+| Cancellation | [`request_cancellation.mmd`](./diagrams/request_cancellation.mmd) | [`request_cancellation.png`](./diagrams/request_cancellation.png) |
+| Migration | [`request_migration.mmd`](./diagrams/request_migration.mmd) | [`request_migration.png`](./diagrams/request_migration.png) |
 | OpenEngine API | [`openengine_api.md`](./openengine_api.md) | N/A |
 
 ## Why this approach exists
@@ -147,7 +147,7 @@ in the sidecar or in engine-owned OpenEngine adapters.
 Reference diagrams:
 
 - Editable source: [`agg_request.mmd`](./diagrams/agg_request.mmd)
-- Rendered asset: [`assets/agg_request.png`](./diagrams/assets/agg_request.png)
+- Rendered asset: [`agg_request.png`](./diagrams/agg_request.png)
 
 Expected implementation shape:
 
@@ -181,9 +181,9 @@ Implementation notes:
 
 Reference diagrams:
 
-- Editable source: [`disagg_request_vllm.mmd`](./vllm/disagg_request_vllm.mmd)
+- Editable source: [`disagg_request.mmd`](./vllm/diagrams/disagg_request.mmd)
 - Rendered asset:
-  [`assets/disagg_request_vllm.png`](./vllm/assets/disagg_request_vllm.png)
+  [`disagg_request.png`](./vllm/diagrams/disagg_request.png)
 
 Expected implementation shape:
 
@@ -226,7 +226,7 @@ Reference diagrams:
 
 - Editable source: [`request_cancellation.mmd`](./diagrams/request_cancellation.mmd)
 - Rendered asset:
-  [`assets/request_cancellation.png`](./diagrams/assets/request_cancellation.png)
+  [`request_cancellation.png`](./diagrams/request_cancellation.png)
 
 Expected implementation shape:
 
@@ -262,7 +262,7 @@ Reference diagrams:
 
 - Editable source: [`request_migration.mmd`](./diagrams/request_migration.mmd)
 - Rendered asset:
-  [`assets/request_migration.png`](./diagrams/assets/request_migration.png)
+  [`request_migration.png`](./diagrams/request_migration.png)
 
 Important: OpenEngine v1 should **not** require a request migration API.
 
