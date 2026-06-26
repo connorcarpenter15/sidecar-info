@@ -2,50 +2,35 @@
 
 ## Purpose
 
-This brief tells an implementation agent what the Dynamo sidecar approach
-should look like. It is based on the sidecar architecture discussion, the
-backend strategy docs, the OpenEngine API direction, and the request-sequence
-diagrams that were produced separately.
+This brief defines the Dynamo sidecar architecture and ownership boundaries.
 
 ## Local diagram references
 
 The diagrams are intentionally stored outside this document. Use the `.mmd`
 files as editable sources and the `.png` files as rendered references.
 
-| Sequence                        | Mermaid source                                           | Rendered asset                                                         |
-| ------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Normal aggregated request       | [`agg_request.mmd`](./agg_request.mmd)                   | [`assets/agg_request.png`](./assets/agg_request.png)                   |
-| Disaggregated request with vLLM | [`disagg_request_vllm.mmd`](./disagg_request_vllm.mmd)   | [`assets/disagg_request_vllm.png`](./assets/disagg_request_vllm.png)   |
-| Request cancellation            | [`request_cancellation.mmd`](./request_cancellation.mmd) | [`assets/request_cancellation.png`](./assets/request_cancellation.png) |
-| Request migration               | [`request_migration.mmd`](./request_migration.mmd)       | [`assets/request_migration.png`](./assets/request_migration.png)       |
-| OpenEngine API                  | [`openengine_api.md`](./openengine_api.md)               | N/A                                                                    |
+| Flow | Source | Rendered |
+|---|---|---|
+| Aggregated request | [`agg_request.mmd`](./diagrams/agg_request.mmd) | [`agg_request.png`](./diagrams/assets/agg_request.png) |
+| vLLM disaggregation | [`disagg_request_vllm.mmd`](./vllm/disagg_request_vllm.mmd) | [`disagg_request_vllm.png`](./vllm/assets/disagg_request_vllm.png) |
+| Cancellation | [`request_cancellation.mmd`](./diagrams/request_cancellation.mmd) | [`request_cancellation.png`](./diagrams/assets/request_cancellation.png) |
+| Migration | [`request_migration.mmd`](./diagrams/request_migration.mmd) | [`request_migration.png`](./diagrams/assets/request_migration.png) |
+| OpenEngine API | [`openengine_api.md`](./openengine_api.md) | N/A |
 
 ## Why this approach exists
 
-Customers often begin with a native engine stack and expect to keep using
-entrypoints such as:
-
-```bash
-vllm serve
-trtllm serve
-```
-
-The current Dynamo wrapper entrypoints create migration friction because users
-must learn a Dynamo-specific launch surface and Dynamo currently owns more
-engine-runtime behavior than users expect. The sidecar proposal is intended to
-reduce that friction by letting native engine servers run as the actual
-aggregated, prefill, or decode serving processes while Dynamo runs beside them
-as a sidecar / remote backend adapter.
-
-The desired outcome is:
+The sidecar keeps engine execution out of the Dynamo process:
 
 - Native engine UX stays familiar.
-- Dynamo no longer has to live inside every runtime container.
-- Upstream engine feature and performance parity is easier to preserve.
+- Engine and Dynamo dependencies stay isolated.
 - Dynamo owns orchestration, routing, KV indexing, event normalization, request
   migration, and control-plane integration.
 - Engines own their native serving stack, scheduler, token generation,
   engine-local KV transfer mechanics, and engine-specific runtime behavior.
+
+See [Why OpenEngine](https://github.com/connorcarpenter15/openengine/blob/main/docs/motivation.md)
+for the protocol rationale and [SGLang sidecar adoption](sglang/openengine_adoption.md)
+for an engine-specific example.
 
 ## Product boundary
 
@@ -161,8 +146,8 @@ in the sidecar or in engine-owned OpenEngine adapters.
 
 Reference diagrams:
 
-- Editable source: [`agg_request.mmd`](./agg_request.mmd)
-- Rendered asset: [`assets/agg_request.png`](./assets/agg_request.png)
+- Editable source: [`agg_request.mmd`](./diagrams/agg_request.mmd)
+- Rendered asset: [`assets/agg_request.png`](./diagrams/assets/agg_request.png)
 
 Expected implementation shape:
 
@@ -196,9 +181,9 @@ Implementation notes:
 
 Reference diagrams:
 
-- Editable source: [`disagg_request_vllm.mmd`](./disagg_request_vllm.mmd)
+- Editable source: [`disagg_request_vllm.mmd`](./vllm/disagg_request_vllm.mmd)
 - Rendered asset:
-  [`assets/disagg_request_vllm.png`](./assets/disagg_request_vllm.png)
+  [`assets/disagg_request_vllm.png`](./vllm/assets/disagg_request_vllm.png)
 
 Expected implementation shape:
 
@@ -239,9 +224,9 @@ vLLM-specific notes:
 
 Reference diagrams:
 
-- Editable source: [`request_cancellation.mmd`](./request_cancellation.mmd)
+- Editable source: [`request_cancellation.mmd`](./diagrams/request_cancellation.mmd)
 - Rendered asset:
-  [`assets/request_cancellation.png`](./assets/request_cancellation.png)
+  [`assets/request_cancellation.png`](./diagrams/assets/request_cancellation.png)
 
 Expected implementation shape:
 
@@ -275,9 +260,9 @@ Cancellation implementation notes:
 
 Reference diagrams:
 
-- Editable source: [`request_migration.mmd`](./request_migration.mmd)
+- Editable source: [`request_migration.mmd`](./diagrams/request_migration.mmd)
 - Rendered asset:
-  [`assets/request_migration.png`](./assets/request_migration.png)
+  [`assets/request_migration.png`](./diagrams/assets/request_migration.png)
 
 Important: OpenEngine v1 should **not** require a request migration API.
 

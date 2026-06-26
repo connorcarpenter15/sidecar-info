@@ -9,8 +9,8 @@ KVBM reaches **full parity** through the sidecar for tiering, KV-aware routing,
 and prefill/decode disaggregation. The reason is structural: KVBM lives entirely
 *inside* the engine process the sidecar already drives.
 
-Companion to [`implementation_brief.md`](./implementation_brief.md) and
-[`openengine_api.md`](./openengine_api.md) (the `GetKvEventSources` /
+Companion to [`implementation_brief.md`](../implementation_brief.md) and
+[`openengine_api.md`](../openengine_api.md) (the `GetKvEventSources` /
 `KvSessionRef` wire contract KVBM rides on).
 
 ---

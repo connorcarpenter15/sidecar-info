@@ -5,8 +5,8 @@ OpenEngine), and an analysis of which feature-parity gaps the sidecar
 architecture can close cheaply versus which ones the process topology itself
 makes expensive.
 
-Companion to [`implementation_brief.md`](./implementation_brief.md) (overall
-architecture) and [`openengine_api.md`](./openengine_api.md) (the wire
+Companion to [`implementation_brief.md`](../implementation_brief.md) (overall
+architecture) and [`openengine_api.md`](../openengine_api.md) (the wire
 contract, including the `media` / `MediaItem` / `Modality` additions).
 
 ---
@@ -79,7 +79,7 @@ pipeline rather than duplicating it. End to end:
 3. **Proto.** `GenerateRequest.media = 8` (repeated `MediaItem`), plus the
    `Modality` enum and `MediaItem` message. Order is significant: the i-th
    media item aligns with the i-th placeholder marker. See
-   [`openengine_api.md`](./openengine_api.md).
+   [`openengine_api.md`](../openengine_api.md).
 4. **vLLM OpenEngine server.** `media_parts_from_request`
    (`vllm/rust/src/server/src/grpc/openengine/convert.rs`) turns proto media
    into chat `MediaContentPart`s (image only; video/audio → `Unimplemented`;
@@ -226,7 +226,7 @@ than a re-implementation problem.
 
 | Area | Location |
 |---|---|
-| Wire contract (media field, `MediaItem`, `Modality`) | `openengine/proto/openengine.proto`; documented in [`openengine_api.md`](./openengine_api.md) |
+| Wire contract (media field, `MediaItem`, `Modality`) | `openengine/proto/openengine.proto`; documented in [`openengine_api.md`](../openengine_api.md) |
 | Sidecar media mapping + fail-closed on `Decoded` | `dynamo/lib/vllm-sidecar/src/engine.rs` (`build_generate_request`, `build_media`) |
 | vLLM proto→chat media conversion | `vllm/rust/src/server/src/grpc/openengine/convert.rs` (`media_parts_from_request`) |
 | vLLM generate wiring + `supports_multimodal` | `vllm/rust/src/server/src/grpc/openengine/mod.rs` |
