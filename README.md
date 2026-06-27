@@ -11,6 +11,7 @@ native engines over OpenEngine.
 | [OpenEngine API](openengine_api.md) | Links to the canonical protocol docs |
 | [SGLang](sglang/) | Adoption guide, diagrams, and benchmarks |
 | [vLLM](vllm/) | Implementation notes, diagrams, and benchmarks |
+| [DSV4 Pro GB200 findings](sglang/benchmarks/benchmark_inferencex_dsv4_pro_gb200_sidecar_findings_2026-06-26.md) | Non-MTP sidecar comparison with public InferenceX results |
 
 ## Diagrams
 

@@ -1,5 +1,10 @@
 # InferenceX DSV4 Pro GB200 SGLang Sidecar Benchmark
 
+> **Superseded attempt.** This document records the failed `20260518` image
+> smoke. The full eight-row matrix subsequently completed with the `20260615`
+> image. See the [final findings](benchmark_inferencex_dsv4_pro_gb200_sidecar_findings_2026-06-26.md)
+> and [detailed run report](../../benchmarks/sglang/benchmark_inferencex_dsv4_pro_gb200_sidecar_2026-06-25.md).
+
 **Status:** smoke gate failed on Lyris job `2214437`; the seven larger rows
 were not submitted.
 
